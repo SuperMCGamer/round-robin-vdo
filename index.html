@@ -189,9 +189,13 @@
 						<input id="showstatus" name="showstatus" type="checkbox" />
 						Show the participant name and queue position
 					</label>
+					<label class="check-field">
+						<input id="idlemusic" name="idlemusic" type="checkbox" checked />
+						Play background music while idle
+					</label>
 					<div class="field">
-						<label for="idleaudio">Idle music URL (optional)</label>
-						<input id="idleaudio" name="idleaudio" type="text" autocomplete="off" placeholder="https://example.com/song.mp3" />
+						<label for="idleaudio">Custom idle music URL (optional)</label>
+						<input id="idleaudio" name="idleaudio" type="text" autocomplete="off" placeholder="Leave blank to use the built-in track" />
 					</div>
 					<div class="field">
 						<label for="idlevolume">Idle music volume (0-1)</label>
@@ -199,7 +203,7 @@
 					</div>
 					<button type="submit">Open viewer</button>
 				</form>
-				<p class="hint">Copy the resulting page URL into an OBS Browser Source. The participant list updates as people join and leave. The background is transparent when no one is live, and the idle music (if set) plays only while no one is live.</p>
+				<p class="hint">Copy the resulting page URL into an OBS Browser Source. The participant list updates as people join and leave. The background is transparent when no one is live, and the built-in background music plays only while no one is live, resuming from where it left off instead of restarting.</p>
 			</section>
 		</main>
 
@@ -212,8 +216,19 @@
 				var intervalSeconds = parseFloat(params.get("interval") || params.get("seconds") || "10");
 				var audioEnabled = params.get("audio") === "1" || params.get("audio") === "true";
 				var showStatus = params.get("showstatus") === "1" || params.get("showstatus") === "true";
-				var idleAudioURL = params.get("idleaudio") || "";
+				var DEFAULT_IDLE_AUDIO_URL = "https://github.com/SuperMCGamer/round-robin-vdo/releases/download/bgmusic-v1/bgmusic.mp3";
+				var idleAudioParam = params.get("idleaudio");
+				var idleAudioURL;
+				if (idleAudioParam === "none" || idleAudioParam === "0") {
+					idleAudioURL = "";
+				} else if (idleAudioParam) {
+					idleAudioURL = idleAudioParam;
+				} else {
+					idleAudioURL = DEFAULT_IDLE_AUDIO_URL;
+				}
 				var idleAudioVolume = parseFloat(params.get("idlevolume") || "1");
+				var idleAudioTimeKey = "vdoninja-rr-idleaudio-time:" + idleAudioURL;
+				var idleAudioSaveTimer = null;
 				var viewer = document.getElementById("viewer");
 				var status = document.getElementById("status");
 				var idleAudio = document.getElementById("idle-audio");
@@ -239,9 +254,36 @@
 				}
 				idleAudioVolume = Math.min(1, Math.max(0, idleAudioVolume));
 
+				function readStoredIdleAudioTime() {
+					try {
+						var stored = window.localStorage.getItem(idleAudioTimeKey);
+						var time = parseFloat(stored);
+						return Number.isFinite(time) && time >= 0 ? time : 0;
+					} catch (err) {
+						return 0;
+					}
+				}
+
+				function storeIdleAudioTime() {
+					try {
+						window.localStorage.setItem(idleAudioTimeKey, String(idleAudio.currentTime));
+					} catch (err) {}
+				}
+
+				function restoreIdleAudioTime() {
+					var storedTime = readStoredIdleAudioTime();
+					if (storedTime > 0 && (!Number.isFinite(idleAudio.duration) || storedTime < idleAudio.duration)) {
+						idleAudio.currentTime = storedTime;
+					}
+				}
+
 				if (idleAudioURL) {
-					idleAudio.src = idleAudioURL;
 					idleAudio.volume = idleAudioVolume;
+					idleAudio.addEventListener("loadedmetadata", restoreIdleAudioTime);
+					idleAudio.src = idleAudioURL;
+
+					window.addEventListener("beforeunload", storeIdleAudioTime);
+					window.addEventListener("pagehide", storeIdleAudioTime);
 				}
 
 				function playIdleAudio() {
@@ -249,6 +291,9 @@
 						return;
 					}
 					idleAudio.play().catch(function () {});
+					if (!idleAudioSaveTimer) {
+						idleAudioSaveTimer = window.setInterval(storeIdleAudioTime, 5000);
+					}
 				}
 
 				function pauseIdleAudio() {
@@ -256,6 +301,9 @@
 						return;
 					}
 					idleAudio.pause();
+					storeIdleAudioTime();
+					window.clearInterval(idleAudioSaveTimer);
+					idleAudioSaveTimer = null;
 				}
 
 				function configureSetupForm() {
@@ -281,10 +329,14 @@
 						if (document.getElementById("showstatus").checked) {
 							targetURL.searchParams.set("showstatus", "1");
 						}
-						var idleAudioValue = document.getElementById("idleaudio").value.trim();
-						if (idleAudioValue) {
-							targetURL.searchParams.set("idleaudio", idleAudioValue);
+						if (document.getElementById("idlemusic").checked) {
+							var idleAudioValue = document.getElementById("idleaudio").value.trim();
+							if (idleAudioValue) {
+								targetURL.searchParams.set("idleaudio", idleAudioValue);
+							}
 							targetURL.searchParams.set("idlevolume", document.getElementById("idlevolume").value);
+						} else {
+							targetURL.searchParams.set("idleaudio", "none");
 						}
 						window.location.href = targetURL.toString();
 					});
