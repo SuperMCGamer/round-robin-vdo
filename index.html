@@ -234,6 +234,8 @@
 				var idleAudio = document.getElementById("idle-audio");
 				var participants = [];
 				var labels = {};
+				var missingCounts = {};
+				var MISSING_STREAM_GRACE_POLLS = 2;
 				var activeStreamID = null;
 				var rotationTimer = null;
 				var replaceTimer = null;
@@ -494,22 +496,32 @@
 					var previousParticipants = participants.slice();
 					var previousActiveIndex = previousParticipants.indexOf(activeStreamID);
 					var incomingLookup = {};
-					var nextParticipants = [];
 
 					incomingIDs.forEach(function (streamID) {
 						incomingLookup[streamID] = true;
 						labels[streamID] = streamIDMap[streamID] || false;
+						missingCounts[streamID] = 0;
 					});
 
 					previousParticipants.forEach(function (streamID) {
-						if (incomingLookup[streamID]) {
-							nextParticipants.push(streamID);
+						if (!incomingLookup[streamID]) {
+							missingCounts[streamID] = (missingCounts[streamID] || 0) + 1;
 						}
+					});
+
+					var nextParticipants = previousParticipants.filter(function (streamID) {
+						return incomingLookup[streamID] || missingCounts[streamID] < MISSING_STREAM_GRACE_POLLS;
 					});
 
 					incomingIDs.forEach(function (streamID) {
 						if (nextParticipants.indexOf(streamID) === -1) {
 							nextParticipants.push(streamID);
+						}
+					});
+
+					Object.keys(missingCounts).forEach(function (streamID) {
+						if (nextParticipants.indexOf(streamID) === -1) {
+							delete missingCounts[streamID];
 						}
 					});
 
@@ -526,7 +538,7 @@
 						if (previousActiveIndex !== -1) {
 							for (var offset = 1; offset <= previousParticipants.length; offset += 1) {
 								var candidate = previousParticipants[(previousActiveIndex + offset) % previousParticipants.length];
-								if (incomingLookup[candidate]) {
+								if (participants.indexOf(candidate) !== -1) {
 									replacementID = candidate;
 									break;
 								}
